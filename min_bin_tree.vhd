@@ -6,7 +6,7 @@
 -- Author      : Ameer Shalabi <ameershalabi94@gmail.com>
 -- Company     : -
 -- Created     : Tue Oct 16 17:24:09 2024
--- Last update : Sun Oct 20 17:01:53 2024
+-- Last update : Sun Oct 20 17:09:08 2024
 -- Platform    : -
 -- Standard    : VHDL-2008
 --------------------------------------------------------------------------------
@@ -28,7 +28,7 @@ use ieee.math_real.all;
 entity min_bin_tree is
   generic (
     w_val_g : integer := 16; -- width of input vector, prefereably power of 2
-    n_val_g : integer := 32  -- defines what type of gate to use 
+    n_val_g : integer := 32  -- number of values in input vector 
   );
   port (
     clk    : in std_logic;
