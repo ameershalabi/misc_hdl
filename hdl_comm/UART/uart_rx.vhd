@@ -6,7 +6,7 @@
 -- Author      : Ameer Shalabi <ameershalabi94@gmail.com>
 -- Company     : 
 -- Created     : Thu Mar  7 11:26:13 2024
--- Last update : Fri Nov 15 14:49:02 2024
+-- Last update : Fri Nov 15 15:23:47 2024
 -- Platform    : -
 -- Standard    : VHDL-2008
 --------------------------------------------------------------------------------
@@ -31,7 +31,7 @@ entity uart_rx is
     clk    : in std_logic; -- clock pin
     n_arst : in std_logic; -- active low rest pin
 
-    rx           : in  std_logic;                   -- Rx line  
+    rx_i           : in  std_logic;                   -- Rx line  
     parity_err_o : out std_logic;                   -- parity check
     busy_o       : out std_logic;                   -- busy flag
     received_o   : out std_logic;                   -- data was recieved
@@ -80,7 +80,7 @@ architecture arch of uart_rx is
 
 begin
 
-  -- indicate if the current baud counter is within the rx sample range
+  -- indicate if the current baud counter is within the Rx sample range
   rx_sample_range <= '1' when
     baud_counter_r > rx_low_sample_point_c and
     baud_counter_r < rx_high_sample_point_c
@@ -109,7 +109,7 @@ begin
           parity_err_o <= '0';
           received_o   <= '0';
           -- if start bit detected, sample Rx at half baud period
-          if (rx = '0') then
+          if (rx_i = '0') then
             rx_state_r <= start_rx;
           end if;
 
@@ -124,9 +124,9 @@ begin
           -- start the baud counter for the start bit
           if baud_counter_r < bit_period_c-1 then
             baud_counter_r <= baud_counter_r + 1;
-            -- check during rx smaple range if rx is still start bit
+            -- check during Rx smaple range if Rx is still start bit
             if rx_sample_range = '1' then
-              if rx = '0' then
+              if rx_i = '0' then
                 -- indicate that data is being sent
                 start_data_rx_r <= '1';
               else
@@ -150,7 +150,7 @@ begin
           end if;
 
         -- DATA STATE:
-        -- sample rx during the Rx sample range
+        -- sample Rx pin during the Rx sample range
         -- once baud counter is done, shift the Rx bit to data register
         -- calculate parity
         -- repeat until bit counter is at max
@@ -162,9 +162,9 @@ begin
           -- start the baud counter for the data bit
           if baud_counter_r < bit_period_c-1 then
             baud_counter_r <= baud_counter_r + 1;
-            -- get the bit during rx sampling range
+            -- get the bit during Rx sampling range
             if rx_sample_range = '1' then
-              rx_data_bit_r <= rx;
+              rx_data_bit_r <= rx_i;
             end if;
           else
             baud_counter_r <= 0;
@@ -185,7 +185,7 @@ begin
           end if;
 
         -- PARITY STATE
-        -- sample rx during the Rx sample range for parity bit
+        -- sample Rx pin during the Rx sample range for parity bit
         -- store the parity bit to parity register
         -- go to stop state
         when rx_parity =>
@@ -195,9 +195,9 @@ begin
           -- start the baud counter for the data bit
           if baud_counter_r < bit_period_c-1 then
             baud_counter_r <= baud_counter_r + 1;
-            -- get the parity during rx sampling range
+            -- get the parity during Rx sampling range
             if rx_sample_range = '1' then
-              parity_rx_sample_r <= rx;
+              parity_rx_sample_r <= rx_i;
             end if;
           else
             baud_counter_r <= 0;
@@ -205,7 +205,7 @@ begin
           end if;
 
         -- STOP STATE
-        -- sample rx during the Rx sample range for stop bit
+        -- sample Rx pin during the Rx sample range for stop bit
         -- if stop bit is high, indicate data was recieved
         -- the recieved signal is held for single clock cycle 
         -- during next idle state, data must be captured within
@@ -216,9 +216,9 @@ begin
           -- start the baud counter for the data bit
           if baud_counter_r < bit_period_c-1 then
             baud_counter_r <= baud_counter_r + 1;
-            -- get the bit during rx sampling range
+            -- get the bit during Rx sampling range
             if rx_sample_range = '1' then
-              stop_data_rx_r <= rx;
+              stop_data_rx_r <= rx_i;
             end if;
           else
             baud_counter_r <= 0;

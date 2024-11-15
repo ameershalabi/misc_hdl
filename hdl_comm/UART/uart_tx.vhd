@@ -6,7 +6,7 @@
 -- Author      : Ameer Shalabi <ameershalabi94@gmail.com>
 -- Company     : 
 -- Created     : Wed Mar  6 12:55:38 2024
--- Last update : Fri Nov 15 14:53:01 2024
+-- Last update : Fri Nov 15 15:23:58 2024
 -- Platform    : -
 -- Standard    : VHDL-2008
 --------------------------------------------------------------------------------
@@ -31,10 +31,10 @@ entity uart_tx is
     n_arst : in std_logic; -- active low rest pin
 
     -- transmit interface
-    tx_start : in  std_logic;                    -- start transmitting 8 bits of data
-    data_i   : in  std_logic_vector(7 downto 0); -- 8 bit data
-    busy_o   : out std_logic;                    -- busy flag
-    tx_o     : out std_logic                     -- output transmission
+    tx_start_i : in  std_logic;                    -- start transmitting 8 bits of data
+    data_i     : in  std_logic_vector(7 downto 0); -- 8 bit data
+    busy_o     : out std_logic;                    -- busy flag
+    tx_o       : out std_logic                     -- output transmission
 
   );
 end entity uart_tx;
@@ -75,14 +75,14 @@ begin
 
         -- IDEL STATE:
         -- Hold the Tx pin high to indicate nothing on Tx line
-        -- go to start state when tx_start is high
+        -- go to start state when tx_start_i is high
         when idle =>
 
           tx_o   <= '1'; -- Nothing on transmission line, Tx pin always high
           busy_o <= '0'; -- Tx is not busy
 
           -- if transmission is started
-          if (tx_start = '1') then
+          if (tx_start_i = '1') then
             tx_state_r     <= start_tx; -- set start state
             tx_data_shft_r <= data_i;   -- get data from input
           end if;
