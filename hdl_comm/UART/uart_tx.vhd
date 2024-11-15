@@ -1,12 +1,12 @@
 --------------------------------------------------------------------------------
 -- Title       : UART transmitter
--- Project     : hdl_comm
+-- Project     : hdl_comm (misc_hdl)
 --------------------------------------------------------------------------------
 -- File        : uart_tx.vhd
 -- Author      : Ameer Shalabi <ameershalabi94@gmail.com>
--- Company     : User Company Name
+-- Company     : 
 -- Created     : Wed Mar  6 12:55:38 2024
--- Last update : Thu Nov 14 14:43:56 2024
+-- Last update : Fri Nov 15 14:53:01 2024
 -- Platform    : -
 -- Standard    : VHDL-2008
 --------------------------------------------------------------------------------
@@ -15,7 +15,6 @@
 --------------------------------------------------------------------------------
 -- Revisions: 
 --------------------------------------------------------------------------------
-
 
 library IEEE;
 use ieee.std_logic_1164.all;
@@ -50,7 +49,7 @@ architecture arch of uart_tx is
   signal tx_state_r : tx_state;
 
   -- data register
-  signal d_shft_r : std_logic_vector(7 downto 0);
+  signal tx_data_shft_r : std_logic_vector(7 downto 0);
 
   -- counter for bit period
   signal baud_counter_r : integer range 0 to bit_period_c-1;
@@ -59,24 +58,24 @@ architecture arch of uart_tx is
   signal data_counter_r : integer range 0 to 7;
 
   -- parity bit
-  signal parity_r : std_logic;
+  signal tx_data_parity_r : std_logic;
 
 begin
 
   tx_proc : process (clk, n_arst)
   begin
     if (n_arst = '0') then
-      tx_state_r     <= idle;
-      d_shft_r       <= (others => '0');
-      baud_counter_r <= 0;
-      data_counter_r <= 0;
-      parity_r       <= '0';
+      tx_state_r       <= idle;
+      tx_data_shft_r   <= (others => '0');
+      baud_counter_r   <= 0;
+      data_counter_r   <= 0;
+      tx_data_parity_r <= '0';
     elsif rising_edge(clk) then
       case tx_state_r is
 
         -- IDEL STATE:
         -- Hold the Tx pin high to indicate nothing on Tx line
-        -- go to start state
+        -- go to start state when tx_start is high
         when idle =>
 
           tx_o   <= '1'; -- Nothing on transmission line, Tx pin always high
@@ -84,8 +83,8 @@ begin
 
           -- if transmission is started
           if (tx_start = '1') then
-            tx_state_r <= start_tx; -- set start state
-            d_shft_r   <= data_i;   -- get data from input
+            tx_state_r     <= start_tx; -- set start state
+            tx_data_shft_r <= data_i;   -- get data from input
           end if;
 
         -- START STATE:
@@ -101,7 +100,7 @@ begin
           if baud_counter_r < bit_period_c-1 then
             baud_counter_r <= baud_counter_r + 1;
           else
-            -- reset baud counter for next state
+            -- reset baud counter 
             baud_counter_r <= 0;
             -- start sending data
             tx_state_r <= tx_data;
@@ -117,8 +116,8 @@ begin
         -- go to stop state
         when tx_data =>
 
-          tx_o   <= d_shft_r(0); -- send LSB of data shift register
-          busy_o <= '1';         -- block is still busy
+          tx_o   <= tx_data_shft_r(0); -- send LSB of data shift register
+          busy_o <= '1';               -- block is still busy
 
           -- start the baud counter for the current data
           if baud_counter_r < bit_period_c-1 then
@@ -132,9 +131,9 @@ begin
               -- if still data not sent, update data counter
               data_counter_r <= data_counter_r + 1;
               -- shift data
-              d_shft_r <= '0' & d_shft_r(7 downto 1);
+              tx_data_shft_r <= '0' & tx_data_shft_r(7 downto 1);
               -- genrate parity of sent bit
-              parity_r <= parity_r xor d_shft_r(0);
+              tx_data_parity_r <= tx_data_parity_r xor tx_data_shft_r(0);
             else
               -- if done, reset data counter
               data_counter_r <= 0;
@@ -146,8 +145,8 @@ begin
         -- SEND PARITY STATE
         -- Set Tx line to value of parity
         when tx_parity =>
-          tx_o   <= parity_r; -- send parity bit
-          busy_o <= '1';      -- flag busy block
+          tx_o   <= tx_data_parity_r; -- send parity bit
+          busy_o <= '1';              -- flag busy block
 
           -- start the baud counter for the stop bit
           if baud_counter_r < bit_period_c-1 then
@@ -158,11 +157,11 @@ begin
             -- set state to idel
             tx_state_r <= idle;
             -- reset parity for next data Tx
-            parity_r   <= '0'; 
+            tx_data_parity_r <= '0';
           end if;
 
         when stop_tx =>
-          tx_o   <= '1'; -- send stop bit by puling Tx pin down
+          tx_o   <= '1'; -- send stop bit by puling Tx pin up
           busy_o <= '1'; -- flag busy block
 
           -- start the baud counter for the stop bit
