@@ -6,7 +6,7 @@
 -- Author      : Ameer Shalabi <ameershalabi94@gmail.com>
 -- Company     : 
 -- Created     : Fri Nov 15 15:16:07 2024
--- Last update : Mon Jan  5 08:58:18 2026
+-- Last update : Mon Jan  5 11:05:03 2026
 -- Platform    : -
 -- Standard    : <VHDL-2008 | VHDL-2002 | VHDL-1993 | VHDL-1987>
 --------------------------------------------------------------------------------
@@ -69,6 +69,8 @@ architecture arch of spi_main is
   -- sample and shift enable signals
   signal samp_en : std_logic;
   signal shft_en : std_logic;
+  -- register to store input data
+  signal in_data_r : std_logic_vector(w_trans_g-1 downto 0);
   -- shift data register (parallel input)
   signal shft_data_r : std_logic_vector(w_trans_g-1 downto 0);
   -- sample data register (parallel output)
@@ -94,9 +96,15 @@ architecture arch of spi_main is
   signal samp_done      : std_logic;
   signal shft_done      : std_logic;
   signal spi_trans_done : std_logic;
+  signal disable_cs     : std_logic;
 
   -- rx output signals
   signal samp_data_valid : std_logic;
+
+  -- chip select signals
+  signal cs_r         : std_logic_vector(n_subnodes_g-1 downto 0);
+  signal cs_counter_r : integer range 0 to n_subnodes_g;
+  signal cs_done      : std_logic;
 
 begin
   -------------------------------
@@ -200,22 +208,9 @@ begin
   ----------------------------------------
   -- FSM CONTROL AND REGISTERS
   ---------------------------------------- 
-
   -- spi start tigger:
   -- when start trigger is high and the spi clock is enabled (spi busy)
   spi_start <= '1' when tx_start_i = '1' and enb_spi_clk_r = '0' else '0';
-
-  -- input register control
-  fsm_reg_proc : process (clk, n_arst)
-  begin
-    if (n_arst = '0') then
-      -- always reset to idle
-      fsm_state <= idle;
-    elsif rising_edge(clk) then
-      -- store next state
-      fsm_state <= fsm_next;
-    end if;
-  end process;
 
   -- control the fsm transition
   fsm_ctrl_proc : process (
@@ -230,11 +225,13 @@ begin
     enb_spi_clk     <= '0';
     MOSI            <= idle_pol;
     samp_data_valid <= '0';
+    disable_cs      <= '0';
     case (fsm_state) is
       -- in idle state, waiting for spi to start
       when idle =>
         enb_spi_clk <= '0';
         fsm_next    <= idle;
+        disable_cs  <= '1';
         -- when spi starts, go to active state
         -- enable the spi clock
         if (spi_start = '1') then
@@ -259,10 +256,25 @@ begin
         -- in output rx state, flag sampled data as valid,
         -- go to idle state waiting for next transaction
         samp_data_valid <= '1';
-        fsm_next        <= idle;
+        fsm_next        <= spi_active;
+        if (cs_done = '1') then
+          fsm_next <= idle;
+        end if;
       when others =>
         fsm_next <= idle;
     end case;
+  end process;
+
+  -- input register control
+  fsm_reg_proc : process (clk, n_arst)
+  begin
+    if (n_arst = '0') then
+      -- always reset to idle
+      fsm_state <= idle;
+    elsif rising_edge(clk) then
+      -- store next state
+      fsm_state <= fsm_next;
+    end if;
   end process;
 
   ----------------------------------------
@@ -272,6 +284,7 @@ begin
   read_shift_data_proc : process (clk, n_arst)
   begin
     if (n_arst = '0') then
+      in_data_r      <= (others => '0');
       shft_data_r    <= (others => '0');
       samp_data_r    <= (others => '0');
       samp_counter_r <= 0;
@@ -280,9 +293,13 @@ begin
       -- if start trigger is recieved, and tx is not busy
       -- store tx_data into shift register
       if (spi_start = '1') then
+        in_data_r      <= tx_data_i;
         shft_data_r    <= tx_data_i;
         samp_counter_r <= 0;
         shft_counter_r <= 0;
+      end if;
+      if (spi_trans_done = '1' and cs_done = '0') then
+        shft_data_r <= in_data_r;
       end if;
       if (samp_en = '1') then
         if (fsm_state = spi_active and samp_done = '0') then
@@ -296,12 +313,15 @@ begin
           shft_counter_r <= shft_counter_r + 1;
         end if;
       end if;
-
+      if (shft_done = '1' and samp_done = '1') then
+        samp_counter_r <= 0;
+        shft_counter_r <= 0;
+      end if;
     end if;
   end process;
 
   -- sample and shift done flags are high when the counters 
-  samp_done <= '1' when shft_counter_r = w_trans_g else '0';
+  samp_done <= '1' when samp_counter_r = w_trans_g else '0';
   shft_done <= '1' when shft_counter_r = w_trans_g else '0';
 
   transaction_done_proc : process (samp_done, shft_done)
@@ -312,6 +332,31 @@ begin
     end if;
   end process transaction_done_proc;
 
+  -- input register control
+  chip_select_counter_proc : process (clk, n_arst)
+  begin
+    if (n_arst = '0') then
+      -- reset chip select to subnode 0
+      cs_r    <= (others => '0');
+      cs_r(0) <= '1';
+      -- reset counter
+      cs_counter_r <= 0;
+    elsif rising_edge(clk) then
+      -- store next state
+      if (spi_trans_done = '1') then
+        cs_counter_r <= cs_counter_r + 1;
+        cs_r         <= cs_r(n_subnodes_g-2 downto 0) & '0';
+      end if;
+      if (disable_cs = '1') then
+        cs_counter_r <= 0;
+        cs_r         <= (others => '0');
+        cs_r(0)      <= '1';
+      end if;
+    end if;
+  end process;
+
+  cs_done <= '1' when cs_counter_r = n_subnodes_g else '0';
+
   ----------------------------------------
   -- SPI OUITPUTS
   ----------------------------------------
@@ -321,4 +366,6 @@ begin
   spi_busy_o <= enb_spi_clk_r;
   rx_valid_o <= samp_data_valid;
   rx_data_o  <= samp_data_r;
+  -- output chip select bits
+  CS         <= cs_r;
 end architecture arch;
