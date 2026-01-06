@@ -6,7 +6,7 @@
 -- Author      : Ameer Shalabi <ameershalabi94@gmail.com>
 -- Company     : 
 -- Created     : Fri Nov 15 15:16:07 2024
--- Last update : Tue Jan  6 11:23:46 2026
+-- Last update : Tue Jan  6 11:38:28 2026
 -- Platform    : -
 -- Standard    : <VHDL-2008 | VHDL-2002 | VHDL-1993 | VHDL-1987>
 --------------------------------------------------------------------------------
@@ -220,6 +220,8 @@ begin
       spi_start,
       shft_data_r,
       spi_trans_done,
+      cs_done,
+      cs_r,
       div_clk_r
     )
   begin
