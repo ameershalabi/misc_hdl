@@ -6,7 +6,7 @@
 -- Author      : Ameer Shalabi <ameershalabi94@gmail.com>
 -- Company     : 
 -- Created     : Fri Nov 15 15:16:07 2024
--- Last update : Mon Jan  5 11:37:26 2026
+-- Last update : Tue Jan  6 11:23:46 2026
 -- Platform    : -
 -- Standard    : <VHDL-2008 | VHDL-2002 | VHDL-1993 | VHDL-1987>
 --------------------------------------------------------------------------------
@@ -113,17 +113,17 @@ begin
   -------------------------------
 
   -- SPI modes using cpol_g and cpha_g
-  --------|--------|--------|------------|---------|---------|
-  -- mode | cpol_g | cpha_g | idle state | sample  |  shift  |
-  --------|--------|--------|------------|---------|---------|
-  --   0  |   '0'  |   '0'  |    '0'     | rising  | falling |
-  --------|--------|--------|------------|---------|---------|
-  --   1  |   '0'  |   '1'  |    '0'     | falling | rising  |
-  --------|--------|--------|------------|---------|---------|
-  --   2  |   '1'  |   '0'  |    '1'     | falling | rising  |
-  --------|--------|--------|------------|---------|---------|
-  --   3  |   '1'  |   '1'  |    '1'     | rising  | falling |
-  --------|--------|--------|------------|---------|---------|
+  --|------|--------|--------|------------|---------|---------|
+  --| mode | cpol_g | cpha_g | idle state | sample  |  shift  |
+  --|------|--------|--------|------------|---------|---------|
+  --|   0  |   '0'  |   '0'  |    '0'     | rising  | falling |
+  --|------|--------|--------|------------|---------|---------|
+  --|   1  |   '0'  |   '1'  |    '0'     | falling | rising  |
+  --|------|--------|--------|------------|---------|---------|
+  --|   2  |   '1'  |   '0'  |    '1'     | falling | rising  |
+  --|------|--------|--------|------------|---------|---------|
+  --|   3  |   '1'  |   '1'  |    '1'     | rising  | falling |
+  --|------|--------|--------|------------|---------|---------|
 
   -- create clock sample/shift polarity at each clock polarity
   gen_pol_p : if (cpol_g = '0') generate
@@ -219,22 +219,25 @@ begin
       fsm_state,
       spi_start,
       shft_data_r,
-      spi_trans_done
+      spi_trans_done,
+      div_clk_r
     )
   begin
     -- set FSM defaults
     fsm_next        <= idle;
+    SCLK            <= idle_pol;
     enb_spi_clk     <= '0';
     MOSI            <= idle_pol;
     samp_data_valid <= '0';
     disable_cs      <= '0';
+    CS          <= (others  => '1');
     case (fsm_state) is
       -- in idle state, waiting for spi to start
       when idle =>
         enb_spi_clk <= '0';
         fsm_next    <= idle;
         -- disable chip select control
-        disable_cs  <= '1';
+        disable_cs <= '1';
         -- when spi starts, go to active state
         -- enable the spi clock
         if (spi_start = '1') then
@@ -242,12 +245,17 @@ begin
           enb_spi_clk <= '1';
         end if;
       when spi_active =>
+        -- stay in spi_active state until all chip selects are done
+        fsm_next <= spi_active;
         -- in active state, forward the LSB of shift data to
-        -- the MOSI port, keep spi clock enabled until 
+        -- the MOSI port, connect divider clock to SCLK, enable
+        -- subnodes
+        -- keep spi clock enabled until 
         -- all transactions are completed
-        fsm_next    <= spi_active;
-        MOSI        <= shft_data_r(0);
         enb_spi_clk <= '1';
+        CS          <= cs_r;
+        SCLK        <= div_clk_r;
+        MOSI        <= shft_data_r(0);
         -- when transactions are complete, go to output
         -- rx state
         -- disable spi clock
@@ -260,7 +268,8 @@ begin
         samp_data_valid <= '1';
         -- go to spi_active state by default as long as there
         -- are chip select remaining
-        fsm_next        <= spi_active;
+        fsm_next <= spi_active;
+        SCLK     <= idle_pol;
         -- if chip select is done, go to idle state
         if (cs_done = '1') then
           fsm_next <= idle;
@@ -300,7 +309,7 @@ begin
       -- shift register
       if (spi_start = '1') then
         in_data_r      <= tx_data_i;
-        shft_data_r    <= tx_data_i; 
+        shft_data_r    <= tx_data_i;
         samp_counter_r <= 0;
         shft_counter_r <= 0;
       end if;
@@ -358,8 +367,8 @@ begin
   begin
     if (n_arst = '0') then
       -- reset chip select to subnode 0
-      cs_r    <= (others => '0');
-      cs_r(0) <= '1';
+      cs_r    <= (others => '1');
+      cs_r(0) <= '0';
       -- reset counter
       cs_counter_r <= 0;
     elsif rising_edge(clk) then
@@ -368,13 +377,13 @@ begin
         -- increment chip select counter
         cs_counter_r <= cs_counter_r + 1;
         -- shift chip select to the left for next subnode select
-        cs_r <= cs_r(n_subnodes_g-2 downto 0) & '0';
+        cs_r <= cs_r(n_subnodes_g-2 downto 0) & '1';
       end if;
       -- once back in idle state, reset the chip select ctrl registers
       if (disable_cs = '1') then
         cs_counter_r <= 0;
-        cs_r         <= (others => '0');
-        cs_r(0)      <= '1';
+        cs_r         <= (others => '1');
+        cs_r(0)      <= '0';
       end if;
     end if;
   end process;
@@ -385,12 +394,8 @@ begin
   ----------------------------------------
   -- SPI OUITPUTS
   ----------------------------------------
-  -- connect spi clock to divider clock
-  SCLK <= div_clk_r;
   -- internal is busy as long as the spi clock is enabled
   spi_busy_o <= enb_spi_clk_r;
   rx_valid_o <= samp_data_valid;
   rx_data_o  <= samp_data_r;
-  -- output chip select bits
-  CS <= cs_r;
 end architecture arch;
