@@ -6,7 +6,7 @@
 -- Author      : Ameer Shalabi <ameershalabi94@gmail.com>
 -- Company     : 
 -- Created     : Fri Nov 15 15:16:07 2024
--- Last update : Tue Jan  6 11:38:28 2026
+-- Last update : Wed Jan  7 14:53:18 2026
 -- Platform    : -
 -- Standard    : <VHDL-2008 | VHDL-2002 | VHDL-1993 | VHDL-1987>
 --------------------------------------------------------------------------------
@@ -152,8 +152,8 @@ begin
   pol_generator_proc : process (clk, n_arst)
     variable div_counter_v : integer range 0 to clk_div_g-1;
     variable half_trans_v  : std_logic;
-    variable curr_clk      : std_logic;
-    variable prev_clk      : std_logic;
+    variable curr_clk_v      : std_logic;
+    variable prev_clk_v      : std_logic;
   begin
     if (n_arst = '0') then
       div_counter_v := 0;
@@ -167,24 +167,24 @@ begin
 
     elsif rising_edge(clk) then
       -- get previous clock polarity
-      prev_clk      := div_clk_r;
+      prev_clk_v      := div_clk_r;
       enb_spi_clk_r <= enb_spi_clk;
       if (enb_spi_clk_r = '1') then
         -- divider counter is at max value
         if div_counter_v = clk_div_g-1 then
           -- generate reverse clock polarity
-          curr_clk := not div_clk_r;
+          curr_clk_v := not div_clk_r;
 
           -- generate clock edge detectors
-          if (curr_clk = '1' and prev_clk = '0') then
+          if (curr_clk_v = '1' and prev_clk_v = '0') then
             div_clk_rising_r <= '1';
           end if;
-          if (curr_clk = '0' and prev_clk = '1') then
+          if (curr_clk_v = '0' and prev_clk_v = '1') then
             div_clk_falling_r <= '1';
           end if;
 
           -- reverse divider clock polarity
-          div_clk_r <= curr_clk;
+          div_clk_r <= curr_clk_v;
 
           -- reset divider counter
           div_counter_v := 0;
@@ -297,7 +297,7 @@ begin
   -- CREATE THE SPI SHIFT REGISTER
   ---------------------------------------- 
   -- input register control
-  read_shift_data_proc : process (clk, n_arst)
+  sample_shift_proc : process (clk, n_arst)
   begin
     if (n_arst = '0') then
       in_data_r      <= (others => '0');
