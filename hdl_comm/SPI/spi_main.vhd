@@ -6,18 +6,39 @@
 -- Author      : Ameer Shalabi <ameershalabi94@gmail.com>
 -- Company     : 
 -- Created     : Fri Nov 15 15:16:07 2024
--- Last update : Wed Jan  7 14:53:18 2026
+-- Last update : Thu Jan  8 12:59:02 2026
 -- Platform    : -
 -- Standard    : <VHDL-2008 | VHDL-2002 | VHDL-1993 | VHDL-1987>
---------------------------------------------------------------------------------
--- Copyright (c) 2024 User Company Name
 -------------------------------------------------------------------------------
 -- Description: An implementation of an SPI main block
+-- In idle state, The block start operating when tx_start_i = '1'. 
+-- At this point the input data of width w_trans_g should be available at the 
+-- tx_data_i port. The block captures the input data from the tx_data_i port to
+-- the shift register. The FSM transitions from idle state to spi_active state.
+-- the spi main block pulls the busy flag HIGH.
+--
+-- In active_state, the clock divider is enabled. Two edge detectors are used 
+-- to detect each of the rising edge and falling edge, which are both connected
+-- to the sample enable (samp_en) and shift enable (shft_en) signals according 
+-- to the current SPI mode (clock polarity (cpol_g) and clock phase (cpha_g)).
+-- The clock divider output is connected to the SCLK output port. The CS port
+-- bits of the current subnode being enabled is pulled LOW
+-- During spi_active state, the samp_en triggers the shift of bit at the MISO 
+-- port into the MSB of the sample register (shift right). The shft_en triggers
+-- the shift of the LSB bit of the shift register (shift right) to the MOSI
+-- port. At each trigger of both samp_en and shft_en, a dedicated counter is 
+-- incremented. When sampling and shifting are both enabled w_trans_g times,
+-- the transation is over. The FSM transitions into output_rx state.
+-- 
+-- In output_rx state, the shift register is connected to the rx_data_o port 
+-- and Rx data is marked as valid on the rx_valid_o port for a signle cycle. 
+-- If the main block has more than a single subnode, the FSM transitions from
+-- output_rx state back to spi_active state and repeats the process for the
+-- all the subnodes connected to the main. 
+-- When all the transactions to all the subnodes have been completed, the FSM
+-- transitions to the idle state waiting for the next tx_start_i signal. the 
+-- busy flag is pulled LOW.
 --------------------------------------------------------------------------------
--- Revisions:  Revisions and documentation are controlled by
--- the revision control system (RCS).  The RCS should be consulted
--- on revision history.
--------------------------------------------------------------------------------
 
 library IEEE;
 use ieee.std_logic_1164.all;
@@ -39,7 +60,7 @@ entity spi_main is
   );
   port (
     clk    : in std_logic; -- clock pin
-    n_arst : in std_logic; -- active low rest pin
+    n_arst : in std_logic; -- active low reset pin
 
     tx_data_i : in  std_logic_vector(w_trans_g-1 downto 0); -- data to send
     rx_data_o : out std_logic_vector(w_trans_g-1 downto 0); -- data recieved
@@ -80,7 +101,9 @@ architecture arch of spi_main is
   signal samp_data_r : std_logic_vector(w_trans_g-1 downto 0);
 
   -- internal signals
-  signal spi_start : std_logic;
+  signal spi_start  : std_logic;
+  signal spi_busy   : std_logic;
+  signal spi_busy_r : std_logic;
 
   -- spi clk singal
   signal enb_spi_clk   : std_logic;
@@ -152,8 +175,8 @@ begin
   pol_generator_proc : process (clk, n_arst)
     variable div_counter_v : integer range 0 to clk_div_g-1;
     variable half_trans_v  : std_logic;
-    variable curr_clk_v      : std_logic;
-    variable prev_clk_v      : std_logic;
+    variable curr_clk_v    : std_logic;
+    variable prev_clk_v    : std_logic;
   begin
     if (n_arst = '0') then
       div_counter_v := 0;
@@ -165,10 +188,14 @@ begin
       -- spi clock enable flag
       enb_spi_clk_r <= '0';
 
+      -- spi busy flag
+      spi_busy_r <= '0';
+
     elsif rising_edge(clk) then
       -- get previous clock polarity
-      prev_clk_v      := div_clk_r;
+      prev_clk_v    := div_clk_r;
       enb_spi_clk_r <= enb_spi_clk;
+      spi_busy_r    <= spi_busy;
       if (enb_spi_clk_r = '1') then
         -- divider counter is at max value
         if div_counter_v = clk_div_g-1 then
@@ -214,6 +241,11 @@ begin
   -- trigger spi
   spi_start <= '1' when tx_start_i = '1' and enb_spi_clk_r = '0' else '0';
 
+  -- FSM transitions
+  -- idle       -> spi_active when spi_start = '1'
+  -- spi_active -> output_rx  when spi_trans_done = '1'
+  -- output_rx  -> spi_active when cs_done = '0'
+  -- output_rx  -> idle       when cs_done = '1'
   -- control the fsm transition
   fsm_ctrl_proc : process (
       fsm_state,
@@ -229,10 +261,11 @@ begin
     fsm_next        <= idle;
     SCLK            <= idle_pol;
     enb_spi_clk     <= '0';
+    spi_busy        <= '0';
     MOSI            <= idle_pol;
     samp_data_valid <= '0';
     disable_cs      <= '0';
-    CS          <= (others  => '1');
+    CS              <= (others => '1');
     case (fsm_state) is
       -- in idle state, waiting for spi to start
       when idle =>
@@ -245,6 +278,7 @@ begin
         if (spi_start = '1') then
           fsm_next    <= spi_active;
           enb_spi_clk <= '1';
+          spi_busy    <= '1';
         end if;
       when spi_active =>
         -- stay in spi_active state until all chip selects are done
@@ -252,9 +286,10 @@ begin
         -- in active state, forward the LSB of shift data to
         -- the MOSI port, connect divider clock to SCLK, enable
         -- subnodes
-        -- keep spi clock enabled until 
+        -- keep spi clock enabled until and busy flag high
         -- all transactions are completed
         enb_spi_clk <= '1';
+        spi_busy    <= '1';
         CS          <= cs_r;
         SCLK        <= div_clk_r;
         MOSI        <= shft_data_r(0);
@@ -272,9 +307,11 @@ begin
         -- are chip select remaining
         fsm_next <= spi_active;
         SCLK     <= idle_pol;
+        spi_busy <= '1';
         -- if chip select is done, go to idle state
         if (cs_done = '1') then
           fsm_next <= idle;
+          spi_busy <= '0';
         end if;
       when others =>
         fsm_next <= idle;
@@ -397,7 +434,7 @@ begin
   -- SPI OUITPUTS
   ----------------------------------------
   -- internal is busy as long as the spi clock is enabled
-  spi_busy_o <= enb_spi_clk_r;
+  spi_busy_o <= spi_busy_r;
   rx_valid_o <= samp_data_valid;
   rx_data_o  <= samp_data_r;
 end architecture arch;

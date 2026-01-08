@@ -6,18 +6,25 @@
 -- Author      : Ameer Shalabi <ameershalabi94@gmail.com>
 -- Company     : 
 -- Created     : Mon Jan  5 09:39:24 2026
--- Last update : Wed Jan  7 21:29:24 2026
+-- Last update : Thu Jan  8 13:21:22 2026
 -- Platform    : -
 -- Standard    : <VHDL-2008 | VHDL-2002 | VHDL-1993 | VHDL-1987>
---------------------------------------------------------------------------------
--- Copyright (c) 2024 User Company Name
 -------------------------------------------------------------------------------
 -- Description: An implementation of an SPI subnode block
+-- The subnode block remains inactive until the CS in pulled LOW by the main.
+-- An edge detector continously checks for the falling edge of the CS. When a 
+-- falling edge is detected, the input data to the the subnode in tx_data_i
+-- is caputred. Two edge detectors are connected to the SCLK sent by the main
+-- and are used to connect to the falling and rising edge triggers to indicate
+-- sample enable (samp_en) and shift enable (shft_en).
+-- When CS is LOW, the samp_en triggers the shift of bit at the MOSI 
+-- port into the MSB of the sample register (shift right). The shft_en triggers
+-- the shift of the LSB bit of the shift register (shift right) to the MISO
+-- port. At each trigger of both samp_en and shft_en, a dedicated counter is 
+-- incremented. When sampling and shifting are both enabled w_trans_g times,
+-- the transation is over. A single clock cycle valid flag is put on the 
+-- rx_valid_o. Once the CS port is pulled HIGH, the subnode block is inactive.
 --------------------------------------------------------------------------------
--- Revisions:  Revisions and documentation are controlled by
--- the revision control system (RCS).  The RCS should be consulted
--- on revision history.
--------------------------------------------------------------------------------
 
 library IEEE;
 use ieee.std_logic_1164.all;
@@ -38,7 +45,7 @@ entity spi_subnode is
     rx_data_o : out std_logic_vector(w_trans_g-1 downto 0); -- data recieved
 
     rx_valid_o : out std_logic; -- recieved data is valid
-    
+
     SCLK : in  std_logic; -- synch clk
     MOSI : in  std_logic; -- data being recieved from main
     MISO : out std_logic; -- data being sent from subnode
@@ -82,7 +89,7 @@ architecture arch of spi_subnode is
 
 begin
 
-  -------------------------------
+  ------------------------------- 
   -- CREATE THE SPI MODE CONTROL
   -------------------------------
 
@@ -99,7 +106,7 @@ begin
   --|   3  |   '1'  |   '1'  |    '1'     | falling | rising  |
   --|------|--------|--------|------------|---------|---------|
 
-  -- create clock sample/shift polarity at each clock polarity
+
   gen_pol_p : if (cpol_g = '0') generate
     trans_count_trigger <= sclk_clk_falling;
     gen_phase_pol_0 : if (cpha_g = '0') generate
@@ -156,22 +163,25 @@ begin
       end if;
     end if;
 
+    -- detect falling edge on CS
     if (curr_cs_v = '0' and prev_cs_v = '1') then
       cs_falling <= '1';
     end if;
 
   end process;
 
-
-
-  -- generate divider clock
+  -- generate edge detection registers
   pol_generator_proc : process (clk, n_arst)
   begin
     if (n_arst = '0') then
       sclk_prev_r <= idle_pol;
       prev_cs_r   <= '1';
     elsif rising_edge(clk) then
+      -- get previous cycle CS
       prev_cs_r <= CS;
+      -- if CS is high, previous clock is idle_pol
+      sclk_prev_r <= idle_pol;
+      -- if CS is low, previous cycle clock
       if (CS = '0') then
         sclk_prev_r <= SCLK;
       end if;
@@ -187,19 +197,26 @@ begin
       trans_counter_r   <= 0;
       samp_data_valid_r <= '0';
     elsif rising_edge(clk) then
+      -- sample data is invalid by default
       samp_data_valid_r <= '0';
+      -- when falling edge on CS is detected,
+      -- capture input data
       if (cs_falling = '1') then
         shft_data_r <= tx_data_i;
       end if;
 
+      -- when SC is low,
       if (CS = '0') then
         if (samp_en = '1') then
+          -- capture MOSI bit into sample register
           samp_data_r <= MOSI & samp_data_r(w_trans_g-1 downto 1);
         end if;
         if (shft_en = '1') then
+          -- shift out LSB bit from shft_data_r
           shft_data_r <= '0' & shft_data_r(w_trans_g-1 downto 1);
         end if;
         -- reset transaction counter when it is done
+        -- mark output Rx as valid
         if (trans_done = '1') then
           trans_counter_r   <= 0;
           samp_data_valid_r <= '1';
@@ -215,9 +232,14 @@ begin
     end if;
   end process;
 
+  -- transacations are done when the transaction counter is 
+  -- equal to the width of the data (w_trans_g)
+  trans_done <= '1' when trans_counter_r = w_trans_g else '0';
+
+  -- MISO is connected to the LSB of the shft_data_r
   MISO       <= shft_data_r(0);
   rx_data_o  <= samp_data_r;
   rx_valid_o <= samp_data_valid_r;
-  trans_done <= '1' when trans_counter_r = w_trans_g else '0';
+
 
 end architecture arch;
