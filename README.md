@@ -30,9 +30,10 @@ These are implementations of communication protocols.
 
 | Block               | Description |
 |:--------------------|:-------------|
-| UART/uart_rx| UART recieved module|
-| UART/uart_tx    | UART transmitter module|
-
+| UART/uart_rx        | UART recieved module|
+| UART/uart_tx        | UART transmitter module|
+| SPI/spi_main        | SPI main module|
+| SPI/spi_subnode     | SPI subnode module|
 
 ### rvh_blks
 These are buffer implementations with simple ready/valid handshake protocol.
